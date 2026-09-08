@@ -1,0 +1,32 @@
+name: Foundry compound contracts
+on:
+  pull_request:
+    paths:
+      - 'compound_curves.py'
+      - 'tests/**'
+      - '.github/workflows/foundry.yml'
+permissions:
+  contents: read
+concurrency:
+  group: compound-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run deterministic contracts
+        run: |
+          python - <<'PY'
+          import importlib.util, inspect
+          spec = importlib.util.spec_from_file_location('contracts', 'tests/test_core.py')
+          mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+          tests = sorted((n, f) for n, f in vars(mod).items() if n.startswith('test_') and inspect.isfunction(f))
+          if not tests: raise SystemExit('zero contracts discovered')
+          for name, fn in tests: fn()
+          print(f'{len(tests)} contracts passed')
+          PY

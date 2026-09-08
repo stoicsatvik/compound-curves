@@ -1,3 +1,5 @@
+from math import isclose
+
 from compound_curves import Step, logistic_transition, sensitivity, simulate, transition
 
 
@@ -12,7 +14,14 @@ def test_compounding_is_deterministic():
 
 
 def test_withdrawal_decay_and_shock_order():
-    assert transition(100, Step(contribution=20, withdrawal=10, rate=.1, decay=.1, shock=-4)) == 104.9
+    # Decimal 0.1 is not exactly representable in binary floating point;
+    # assert the mathematical contract without requiring an exact bit pattern.
+    assert isclose(
+        transition(100, Step(contribution=20, withdrawal=10, rate=.1, decay=.1, shock=-4)),
+        104.9,
+        rel_tol=0.0,
+        abs_tol=1e-12,
+    )
 
 
 def test_floor_and_cap_are_invariants():

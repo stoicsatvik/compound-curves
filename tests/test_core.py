@@ -5,6 +5,9 @@ from compound_curves import (
     compare_scenarios,
     logistic_transition,
     rank_sensitivities,
+    results_to_csv,
+    scenarios_from_json,
+    scenarios_to_json,
     sensitivity,
     simulate,
     transition,
@@ -22,12 +25,7 @@ def test_compounding_is_deterministic():
 
 
 def test_withdrawal_decay_and_shock_order():
-    assert isclose(
-        transition(100, Step(contribution=20, withdrawal=10, rate=.1, decay=.1, shock=-4)),
-        104.9,
-        rel_tol=0.0,
-        abs_tol=1e-12,
-    )
+    assert isclose(transition(100, Step(contribution=20, withdrawal=10, rate=.1, decay=.1, shock=-4)), 104.9, rel_tol=0.0, abs_tol=1e-12)
 
 
 def test_floor_and_cap_are_invariants():
@@ -49,22 +47,15 @@ def test_sensitivity_reports_terminal_delta():
 
 def test_invalid_parameters_fail_closed():
     for step in (Step(decay=1.1), Step(rate=-1.1)):
-        try:
-            transition(100, step)
-        except ValueError:
-            pass
-        else:
-            raise AssertionError("invalid transition accepted")
+        try: transition(100, step)
+        except ValueError: pass
+        else: raise AssertionError("invalid transition accepted")
 
 
 def test_scenario_comparison_ranks_terminal_value_deterministically():
-    scenarios = {
-        "steady": (Step(contribution=10, rate=.03),) * 5,
-        "growth": (Step(contribution=5, rate=.08),) * 5,
-    }
+    scenarios = {"steady": (Step(contribution=10, rate=.03),) * 5, "growth": (Step(contribution=5, rate=.08),) * 5}
     first = compare_scenarios(100, scenarios)
-    second = compare_scenarios(100, scenarios)
-    assert first == second
+    assert first == compare_scenarios(100, scenarios)
     assert first[0].terminal >= first[1].terminal
     assert {result.name for result in first} == {"steady", "growth"}
 
@@ -85,13 +76,33 @@ def test_parameter_dominance_is_explicit_and_deterministic():
 
 
 def test_empty_comparison_inputs_fail_closed():
-    for operation in (
-        lambda: compare_scenarios(100, {}),
-        lambda: rank_sensitivities(100, (Step(),), {}),
-    ):
-        try:
-            operation()
-        except ValueError:
-            pass
-        else:
-            raise AssertionError("empty comparison input accepted")
+    for operation in (lambda: compare_scenarios(100, {}), lambda: rank_sensitivities(100, (Step(),), {})):
+        try: operation()
+        except ValueError: pass
+        else: raise AssertionError("empty comparison input accepted")
+
+
+def test_json_round_trip_is_canonical_and_order_independent():
+    scenarios = {"zeta": (Step(rate=.02),), "alpha": (Step(contribution=3), Step(shock=-1))}
+    encoded = scenarios_to_json(100, scenarios)
+    encoded_reordered = scenarios_to_json(100, {"alpha": scenarios["alpha"], "zeta": scenarios["zeta"]})
+    assert encoded == encoded_reordered
+    initial, decoded = scenarios_from_json(encoded)
+    assert initial == 100
+    assert decoded == scenarios
+    assert scenarios_to_json(initial, decoded) == encoded
+
+
+def test_csv_output_is_byte_deterministic_and_ranked():
+    results = compare_scenarios(100, {"slow": (Step(rate=.01),), "fast": (Step(rate=.10),)})
+    first = results_to_csv(results)
+    assert first == results_to_csv(results)
+    assert first.startswith("rank,name,terminal,history_json\n1,fast,")
+    assert first.endswith("\n")
+
+
+def test_interchange_rejects_malformed_or_nonfinite_inputs():
+    for text in ("{}", "not-json", '{"initial":100,"scenarios":{}}', '{"initial":100,"scenarios":{"x":[{"rate":NaN}]}}'):
+        try: scenarios_from_json(text)
+        except ValueError: pass
+        else: raise AssertionError("invalid interchange accepted")

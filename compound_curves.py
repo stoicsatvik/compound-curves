@@ -1,6 +1,9 @@
 """Deterministic discrete-time compounding primitives."""
-from dataclasses import dataclass
-from math import exp, isfinite
+from dataclasses import asdict, dataclass
+import csv
+import io
+import json
+from math import isfinite
 from typing import Iterable
 
 @dataclass(frozen=True)
@@ -87,3 +90,35 @@ def rank_sensitivities(initial: float, steps: tuple[Step, ...], deltas: dict[str
         for parameter, delta in deltas.items()
     )
     return tuple(sorted(results, key=lambda result: (-abs(result.terminal_delta), result.parameter)))
+
+
+def scenarios_to_json(initial: float, scenarios: dict[str, tuple[Step, ...]]) -> str:
+    """Canonical JSON input representation, stable across mapping insertion order."""
+    if not scenarios:
+        raise ValueError("at least one scenario is required")
+    payload = {"initial": initial, "scenarios": {name: [asdict(step) for step in scenarios[name]] for name in sorted(scenarios)}}
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
+
+
+def scenarios_from_json(text: str) -> tuple[float, dict[str, tuple[Step, ...]]]:
+    """Parse canonical scenario JSON and validate through the model."""
+    try:
+        payload = json.loads(text)
+        initial = float(payload["initial"])
+        scenarios = {str(name): tuple(Step(**step) for step in steps) for name, steps in payload["scenarios"].items()}
+        compare_scenarios(initial, scenarios)
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError("invalid scenario JSON") from exc
+    return initial, scenarios
+
+
+def results_to_csv(results: tuple[ScenarioResult, ...]) -> str:
+    """Export deterministic ranked results as newline-stable CSV."""
+    if not results:
+        raise ValueError("at least one result is required")
+    stream = io.StringIO(newline="")
+    writer = csv.writer(stream, lineterminator="\n")
+    writer.writerow(("rank", "name", "terminal", "history_json"))
+    for rank, result in enumerate(results, 1):
+        writer.writerow((rank, result.name, repr(result.terminal), json.dumps(result.history, separators=(",", ":"), allow_nan=False)))
+    return stream.getvalue()

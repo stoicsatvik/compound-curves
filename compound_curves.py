@@ -96,16 +96,28 @@ def scenarios_to_json(initial: float, scenarios: dict[str, tuple[Step, ...]]) ->
     """Canonical JSON input representation, stable across mapping insertion order."""
     if not scenarios:
         raise ValueError("at least one scenario is required")
+    if isinstance(initial, bool) or not isinstance(initial, (int, float)) or not isfinite(initial):
+        raise ValueError("initial must be a finite JSON number")
     payload = {"initial": initial, "scenarios": {name: [asdict(step) for step in scenarios[name]] for name in sorted(scenarios)}}
     return json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
 
+def _reject_json_constant(value: str) -> None:
+    """Reject non-standard NaN/Infinity constants accepted by Python's decoder."""
+    raise ValueError(f"non-finite JSON constant: {value}")
+
+
 def scenarios_from_json(text: str) -> tuple[float, dict[str, tuple[Step, ...]]]:
-    """Parse canonical scenario JSON and validate through the model."""
+    """Parse canonical scenario JSON without changing valid JSON number representation."""
     try:
-        payload = json.loads(text)
-        initial = float(payload["initial"])
-        scenarios = {str(name): tuple(Step(**step) for step in steps) for name, steps in payload["scenarios"].items()}
+        payload = json.loads(text, parse_constant=_reject_json_constant)
+        initial = payload["initial"]
+        if isinstance(initial, bool) or not isinstance(initial, (int, float)) or not isfinite(initial):
+            raise ValueError("initial must be a finite JSON number")
+        raw_scenarios = payload["scenarios"]
+        if not isinstance(raw_scenarios, dict):
+            raise ValueError("scenarios must be an object")
+        scenarios = {name: tuple(Step(**step) for step in steps) for name, steps in raw_scenarios.items()}
         compare_scenarios(initial, scenarios)
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
         raise ValueError("invalid scenario JSON") from exc

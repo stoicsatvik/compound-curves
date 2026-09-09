@@ -12,6 +12,19 @@ class Step:
     shock: float = 0.0
 
 
+@dataclass(frozen=True)
+class ScenarioResult:
+    name: str
+    terminal: float
+    history: tuple[float, ...]
+
+
+@dataclass(frozen=True)
+class SensitivityResult:
+    parameter: str
+    terminal_delta: float
+
+
 def transition(stock: float, step: Step, *, cap: float | None = None) -> float:
     """Apply flows, multiplicative gain/decay, shock, then optional hard cap."""
     values = (stock, step.contribution, step.withdrawal, step.rate, step.decay, step.shock)
@@ -50,3 +63,27 @@ def sensitivity(initial: float, steps: tuple[Step, ...], parameter: str, delta: 
     baseline = simulate(initial, steps, cap=cap)[-1]
     changed = tuple(Step(**{**s.__dict__, parameter: getattr(s, parameter) + delta}) for s in steps)
     return simulate(initial, changed, cap=cap)[-1] - baseline
+
+
+def compare_scenarios(initial: float, scenarios: dict[str, tuple[Step, ...]], *, cap: float | None = None) -> tuple[ScenarioResult, ...]:
+    """Evaluate named scenarios and rank by terminal stock, then name for stable ties."""
+    if not scenarios:
+        raise ValueError("at least one scenario is required")
+    results = []
+    for name, steps in scenarios.items():
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("scenario names must be non-empty strings")
+        history = simulate(initial, steps, cap=cap)
+        results.append(ScenarioResult(name=name, terminal=history[-1], history=history))
+    return tuple(sorted(results, key=lambda result: (-result.terminal, result.name)))
+
+
+def rank_sensitivities(initial: float, steps: tuple[Step, ...], deltas: dict[str, float], *, cap: float | None = None) -> tuple[SensitivityResult, ...]:
+    """Rank explicit parameter perturbations by absolute terminal impact."""
+    if not deltas:
+        raise ValueError("at least one parameter delta is required")
+    results = tuple(
+        SensitivityResult(parameter=parameter, terminal_delta=sensitivity(initial, steps, parameter, delta, cap=cap))
+        for parameter, delta in deltas.items()
+    )
+    return tuple(sorted(results, key=lambda result: (-abs(result.terminal_delta), result.parameter)))

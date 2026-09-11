@@ -28,6 +28,13 @@ class SensitivityResult:
     terminal_delta: float
 
 
+@dataclass(frozen=True)
+class NormalizedSensitivityResult:
+    parameter: str
+    normalized_impact: float
+    terminal_delta: float
+
+
 def transition(stock: float, step: Step, *, cap: float | None = None) -> float:
     """Apply flows, multiplicative gain/decay, shock, then optional hard cap."""
     values = (stock, step.contribution, step.withdrawal, step.rate, step.decay, step.shock)
@@ -90,6 +97,27 @@ def rank_sensitivities(initial: float, steps: tuple[Step, ...], deltas: dict[str
         for parameter, delta in deltas.items()
     )
     return tuple(sorted(results, key=lambda result: (-abs(result.terminal_delta), result.parameter)))
+
+
+def rank_normalized_sensitivities(initial: float, steps: tuple[Step, ...], scales: dict[str, float], *, fraction: float = 0.01, cap: float | None = None) -> tuple[NormalizedSensitivityResult, ...]:
+    """Rank parameters using equal fractional perturbations of explicit reference scales.
+
+    The score is terminal change divided by baseline terminal value and perturbation
+    fraction. Supplying scales in the same units as each parameter makes the ranking
+    invariant to a consistent change of units for that parameter.
+    """
+    if not scales or not isfinite(fraction) or fraction <= 0:
+        raise ValueError("scales and a positive finite fraction are required")
+    baseline = simulate(initial, steps, cap=cap)[-1]
+    if baseline <= 0 or not isfinite(baseline):
+        raise ValueError("positive finite baseline terminal value is required")
+    results = []
+    for parameter, scale in scales.items():
+        if parameter not in Step.__dataclass_fields__ or not isfinite(scale) or scale <= 0:
+            raise ValueError("unknown parameter or invalid reference scale")
+        terminal_delta = sensitivity(initial, steps, parameter, fraction * scale, cap=cap)
+        results.append(NormalizedSensitivityResult(parameter, terminal_delta / baseline / fraction, terminal_delta))
+    return tuple(sorted(results, key=lambda result: (-abs(result.normalized_impact), result.parameter)))
 
 
 def scenarios_to_json(initial: float, scenarios: dict[str, tuple[Step, ...]]) -> str:

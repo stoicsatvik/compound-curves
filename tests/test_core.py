@@ -4,6 +4,7 @@ from compound_curves import (
     Step,
     compare_scenarios,
     logistic_transition,
+    rank_normalized_sensitivities,
     rank_sensitivities,
     results_to_csv,
     scenarios_from_json,
@@ -73,6 +74,29 @@ def test_parameter_dominance_is_explicit_and_deterministic():
     impacts = tuple(abs(result.terminal_delta) for result in ranked)
     assert impacts == tuple(sorted(impacts, reverse=True))
     assert {result.parameter for result in ranked} == set(deltas)
+
+
+def test_normalized_sensitivity_is_unit_invariant_for_flow_scale():
+    steps = (Step(contribution=5, rate=.05, decay=.01),) * 12
+    base = rank_normalized_sensitivities(100, steps, {"contribution": 5.0, "rate": .05, "decay": .01})
+    scaled_steps = tuple(Step(contribution=s.contribution * 100, rate=s.rate, decay=s.decay) for s in steps)
+    scaled = rank_normalized_sensitivities(10000, scaled_steps, {"contribution": 500.0, "rate": .05, "decay": .01})
+    assert tuple(x.parameter for x in base) == tuple(x.parameter for x in scaled)
+    for left, right in zip(base, scaled):
+        assert isclose(left.normalized_impact, right.normalized_impact, rel_tol=1e-12, abs_tol=1e-12)
+
+
+def test_normalized_sensitivity_fails_closed_without_valid_scale_or_baseline():
+    bad = (
+        lambda: rank_normalized_sensitivities(100, (Step(),), {}),
+        lambda: rank_normalized_sensitivities(100, (Step(),), {"rate": 0}),
+        lambda: rank_normalized_sensitivities(0, (Step(),), {"rate": .01}),
+        lambda: rank_normalized_sensitivities(100, (Step(),), {"rate": .01}, fraction=0),
+    )
+    for operation in bad:
+        try: operation()
+        except ValueError: pass
+        else: raise AssertionError("invalid normalized sensitivity input accepted")
 
 
 def test_empty_comparison_inputs_fail_closed():
